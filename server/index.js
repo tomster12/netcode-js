@@ -44,12 +44,12 @@ class App {
 
     startMainLoops() {
         setInterval(() => {
-            this.game.gameState.syncState();
-        }, 1000 / SYNC_FPS);
-
-        setInterval(() => {
             this.game.update();
         }, 1000 / GAME_FPS);
+
+        setInterval(() => {
+            this.game.gameState.sendSyncState();
+        }, 1000 / SYNC_FPS);
     }
 }
 
@@ -99,7 +99,7 @@ class GameState {
         this.events.push(...events);
     }
 
-    syncState() {
+    sendSyncState() {
         this.game.app.socketServer.emit("syncState", this.data);
     }
 }

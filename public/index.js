@@ -86,7 +86,7 @@ class GameState {
         this.dt = new DT();
 
         this.game.app.socket.on("syncState", (data) => {
-            this.onSyncState(data);
+            this.onReceiveSyncState(data);
         });
     }
 
@@ -96,7 +96,7 @@ class GameState {
         this.events = [];
     }
 
-    onSyncState(data) {
+    onReceiveSyncState(data) {
         this.data = data;
         this.dt.update();
     }
