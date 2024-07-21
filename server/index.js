@@ -1,7 +1,7 @@
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import { DT, initGameState, updateGameState } from "../common/shared.js";
+import { DT, initGameState, updateGameState, cleanGameStateFromSocket } from "../common/shared.js";
 
 const SYNC_FPS = 40;
 const GAME_FPS = 120;
@@ -13,42 +13,38 @@ class App {
     expressApp;
     httpServer;
     socketServer;
-    gameState;
     game;
 
     constructor() {
         this.expressApp = express();
-        this.httpServer = createServer(this.expressApp);
-        this.socketServer = new Server(this.httpServer);
-
         this.expressApp.use(express.static("public"));
         this.expressApp.get("/shared.js", (req, res) => {
             res.sendFile("shared.js", { root: "common" });
         });
 
-        this.gameState = new GameState(this);
-        this.game = new Game(this);
+        this.httpServer = createServer(this.expressApp);
 
+        this.socketServer = new Server(this.httpServer);
         this.socketServer.on("connection", (socket) => {
             console.log("Socket Connect: " + socket.id);
-
             socket.on("disconnect", () => {
                 console.log("Socket Disconnect: " + socket.id);
             });
         });
 
+        this.game = new Game(this);
+
         console.log("Starting server...");
         this.httpServer.listen(3000, () => {
             console.log("listening on http://localhost:3000");
             this.isListening = true;
-
             this.startMainLoops();
         });
     }
 
     startMainLoops() {
         setInterval(() => {
-            this.gameState.syncState();
+            this.game.gameState.syncState();
         }, 1000 / SYNC_FPS);
 
         setInterval(() => {
@@ -57,17 +53,42 @@ class App {
     }
 }
 
-class GameState {
+class Game {
     app;
-    state;
-    events;
+    gameState;
+    dt;
 
     constructor(app) {
         this.app = app;
-        this.state = initGameState();
-        this.events = [];
+        this.gameState = new GameState(this);
+        this.dt = new DT();
 
         this.app.socketServer.on("connection", (socket) => {
+            socket.on("disconnect", () => {
+                console.log("Socket Disconnect: " + socket.id);
+                cleanGameStateFromSocket(this.gameState, socket.id);
+            });
+        });
+    }
+
+    update() {
+        if (!this.app.isListening) return;
+        this.dt.update();
+        updateGameState(this.dt.current, this.gameState);
+        this.gameState.events = [];
+    }
+}
+
+class GameState {
+    game;
+    data;
+    events;
+
+    constructor(game) {
+        this.game = game;
+        initGameState(this);
+
+        this.game.app.socketServer.on("connection", (socket) => {
             socket.on("events", (events) => {
                 this.onReceiveEvents(events);
             });
@@ -79,24 +100,7 @@ class GameState {
     }
 
     syncState() {
-        this.app.socketServer.emit("syncState", this.state);
-    }
-}
-
-class Game {
-    app;
-    dt;
-
-    constructor(app) {
-        this.app = app;
-        this.dt = new DT();
-    }
-
-    update() {
-        if (!this.app.isListening) return;
-        this.dt.update();
-        updateGameState(this.dt.current, this.app.gameState);
-        this.app.gameState.events = [];
+        this.game.app.socketServer.emit("syncState", this.data);
     }
 }
 

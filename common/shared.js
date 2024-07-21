@@ -18,29 +18,38 @@ class DT {
     }
 }
 
-function initGameState() {
-    return {
+function initGameState(gameState) {
+    gameState.data = {
         worldTime: 0,
         players: {},
     };
+    gameState.events = [];
 }
 
 function updateGameState(dt, gameState) {
-    gameState.state.worldTime += dt;
+    gameState.data.worldTime += dt;
 
     for (let event of gameState.events) {
         switch (event.type) {
             case "addPlayer":
-                gameState.state.players[event.data.id] = {
+                gameState.data.players[event.data.id] = {
                     pos: { x: 0, y: 0 },
                     color: event.data.color,
                 };
                 break;
+
             case "movePlayer":
-                if (!gameState.state.players[event.data.id]) return;
-                gameState.state.players[event.data.id].pos = event.data.pos;
+                if (!gameState.data.players[event.data.id]) return;
+                gameState.data.players[event.data.id].pos = event.data.pos;
                 break;
         }
+    }
+}
+
+function cleanGameStateFromSocket(gameState, socketID) {
+    console.log("Cleaning data for socket: ", socketID);
+    if (gameState.data.players[socketID]) {
+        delete gameState.data.players[socketID];
     }
 }
 
@@ -50,6 +59,7 @@ if (typeof window !== "undefined") {
     window.DT = DT;
     window.initGameState = initGameState;
     window.updateGameState = updateGameState;
+    window.cleanGameStateFromSocket = cleanGameStateFromSocket;
 }
 
-export { DT, initGameState, updateGameState };
+export { DT, initGameState, updateGameState, cleanGameStateFromSocket };
