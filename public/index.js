@@ -66,12 +66,12 @@ class Game {
         fill(255);
         textSize(20);
         if (this.dt.last10.length > 0) {
-            let gameFPS = 1000 / (this.dt.last10.reduce((acc, val) => acc + val) / this.dt.last10.length);
-            text(`Game FPS: ${gameFPS.toFixed(2)}`, 10, 30);
+            let averageGameDT = this.dt.last10.reduce((acc, val) => acc + val) / this.dt.last10.length;
+            text(`Game FPS: ${(1 / averageGameDT).toFixed(2)}`, 10, 30);
         }
         if (this.gameState.dt.last10.length > 0) {
-            let syncFPS = 1000 / (this.gameState.dt.last10.reduce((acc, val) => acc + val) / this.gameState.dt.last10.length);
-            text(`Sync FPS: ${syncFPS.toFixed(2)}`, 10, 60);
+            let averageSyncDT = this.gameState.dt.last10.reduce((acc, val) => acc + val) / this.gameState.dt.last10.length;
+            text(`Sync FPS: ${(1 / averageSyncDT).toFixed(2)}`, 10, 60);
         }
     }
 }
@@ -107,9 +107,10 @@ class Player {
         this.game = game;
         this.game.app.socket.on("connect", () => {
             this.game.gameState.events.push({
-                type: "addPlayer",
+                type: "playerAdd",
                 data: {
                     id: this.game.app.socket.id,
+                    pos: { x: Math.random() * width, y: height / 2 },
                     color: { r: Math.random() * 255, g: Math.random() * 255, b: Math.random() * 255 },
                 },
             });
@@ -117,10 +118,22 @@ class Player {
     }
 
     update() {
-        let mousePos = { x: mouseX, y: mouseY };
+        if (!this.game.gameState.data.players[this.game.app.socket.id]) return;
+        let player = this.game.gameState.data.players[this.game.app.socket.id];
+
+        let inputDir = 0;
+        let inputJump = false;
+        if (keyIsDown(LEFT_ARROW) || keyIsDown(65)) inputDir -= 1;
+        if (keyIsDown(RIGHT_ARROW) || keyIsDown(68)) inputDir += 1;
+        if (keyIsDown(UP_ARROW) || keyIsDown(87) || keyIsDown(32)) inputJump = true;
+
         this.game.gameState.events.push({
-            type: "movePlayer",
-            data: { id: this.game.app.socket.id, pos: mousePos },
+            type: "playerInput",
+            data: {
+                id: this.game.app.socket.id,
+                inputDir,
+                inputJump,
+            },
         });
     }
 }
