@@ -1,34 +1,33 @@
-const SET_FRAMERATE = 60;
+const GAME_FPS = 120;
 
 let globals = {};
 
-function setup() {
-    createCanvas(500, 800);
-    noSmooth();
-    frameRate(SET_FRAMERATE);
-    globals.app = new App();
-}
-
-function draw() {
-    background(0);
-    globals.app.update();
-}
-
-// --------------------------------------------------------------------------------
-
 class App {
+    isConnected;
     socket;
     gameState;
     game;
 
     constructor() {
         this.socket = io();
-        this.gameState = new GameState(this.socket);
-        this.game = new Game(this.gameState);
+
+        this.gameState = new GameState(this);
+        this.game = new Game(this);
+
+        console.log("Connecting to server...");
+        this.socket.on("connect", () => {
+            console.log("Socket Connected: " + this.socket.id);
+            this.isConnected = true;
+
+            this.socket.on("disconnect", () => {
+                console.log("Socket Disconnected: " + this.socket.id);
+                this.isConnected = false;
+            });
+        });
     }
 
     update() {
-        this.deltaTime = 1 / frameRate();
+        if (!this.isConnected) return;
         this.game.update();
         this.game.render();
         this.gameState.sendEvents();
@@ -36,150 +35,108 @@ class App {
 }
 
 class GameState {
-    socket;
+    app;
     state;
+    events;
 
-    constructor(socket) {
-        this.socket = socket;
-        this.state = {
-            events: [],
-            players: {},
-        };
-        this.socket.on("syncState", onSyncState);
+    constructor(app) {
+        this.app = app;
+        this.state = initGameState();
+        this.events = [];
+        this.dt = new DT();
+
+        this.app.socket.on("syncState", (data) => {
+            this.onSyncState(data);
+        });
     }
 
     sendEvents() {
-        if (this.state.events.length === 0) return;
-        this.socket.emit("events", this.state.events);
-        this.state.events = [];
+        if (this.events.length === 0) return;
+        this.app.socket.emit("events", this.events);
+        this.events = [];
     }
 
     onSyncState(data) {
         this.state = data;
+        this.dt.update();
     }
 }
 
 class Game {
-    gameState;
+    static PLAYER_RADIUS = 20;
+    app;
+    dt;
     player;
 
-    constructor(gameState) {
-        this.gameState = gameState;
-        this.player = new Player(this);
+    constructor(app) {
+        this.app = app;
+        this.dt = new DT();
+        this.player = null;
+
+        this.app.socket.on("connect", () => {
+            this.player = new Player(this);
+        });
     }
 
     update() {
+        if (!this.app.isConnected) return;
+        this.dt.update();
         this.player.update();
-        this.simulateState();
+        updateGameState(this.dt.current, this.app.gameState);
     }
 
-    simulateState() {}
+    render() {
+        background(0);
 
-    render() {}
-}
+        for (let id in this.app.gameState.state.players) {
+            let player = this.app.gameState.state.players[id];
+            fill(player.color.r, player.color.g, player.color.b);
+            noStroke();
+            ellipse(player.pos.x, player.pos.y, Game.PLAYER_RADIUS * 2);
+        }
 
-class Player {
-    constructor(game) {
-        this.game = game;
-
-        // Add new player event
-        this.game.gameState.state.events.push({
-            type: "addPlayer",
-            data: { id: this.game.gameState.socket.id },
-        });
-    }
-
-    update() {
-        // Get mouse position
-        let mousePos = { x: mouseX, y: mouseY };
-
-        // Add move event
-        this.game.gameState.state.events.push({
-            type: "move",
-            data: { id: this.game.gameState.socket.id, pos: mousePos },
-        });
-    }
-}
-
-/*
-class World {
-    static GRID_SIZE = 35;
-    game;
-    tiles;
-    drawSettings;
-    worldGridSize;
-
-    constructor(game, drawSettings) {
-        this.game = game;
-        this.tiles = [];
-        this.drawSettings = drawSettings;
-        this.worldGridSize = { x: 10, y: 20 };
-    }
-
-    update() {}
-
-    draw() {
-        noFill();
-        stroke(255);
-        rect(
-            this.drawSettings.centreX - (this.worldGridSize.x * World.GRID_SIZE) / 2,
-            this.drawSettings.centreY - (this.worldGridSize.y * World.GRID_SIZE) / 2,
-            this.worldGridSize.x * World.GRID_SIZE,
-            this.worldGridSize.y * World.GRID_SIZE
-        );
-    }
-
-    gridToWorld(pos) {
-        return {
-            x: this.drawSettings.centreX - (this.worldGridSize.x * World.GRID_SIZE) / 2 + pos.x * World.GRID_SIZE,
-            y: this.drawSettings.centreY + (this.worldGridSize.y * World.GRID_SIZE) / 2 - pos.y * World.GRID_SIZE,
-        };
-    }
-}
-
-class Player {
-    static SIZE = { x: 20, y: 20 };
-    static MOVEMENT_DRAG = 0.75;
-    static MOVEMENT_SPEED = 2;
-    game;
-    gridPos;
-    moveVel;
-    collider;
-
-    constructor(game) {
-        this.game = game;
-        this.gridPos = { x: 0, y: 0 };
-        this.moveVel = { x: 0, y: 0 };
-    }
-
-    update() {
-        let inputMovement = { x: 0, y: 0 };
-        let inputJump = false;
-        if (keyIsDown(LEFT_ARROW) || keyIsDown(65)) inputMovement.x -= 1;
-        if (keyIsDown(RIGHT_ARROW) || keyIsDown(68)) inputMovement.x += 1;
-        if (keyIsDown(UP_ARROW) || keyIsDown(32)) inputJump = true;
-
-        this.moveVel.x = Utility.lerp(this.moveVel.x, inputMovement.x * Player.MOVEMENT_SPEED, this.game.deltaTime);
-        this.moveVel.y = Utility.lerp(this.moveVel.y, inputMovement.y * Player.MOVEMENT_SPEED, this.game.deltaTime);
-        this.gridPos.x += this.moveVel.x;
-        this.gridPos.y += this.moveVel.y;
-        this.moveVel.x *= Player.MOVEMENT_DRAG;
-        this.moveVel.y *= Player.MOVEMENT_DRAG;
-
-        // this.game.world.applyPhysics(this);
-    }
-
-    draw() {
-        let worldPos = this.game.world.gridToWorld(this.gridPos);
         fill(255);
-        rect(worldPos.x, worldPos.y - Player.SIZE.y, Player.SIZE.x, Player.SIZE.y);
+        textSize(20);
+        if (this.dt.last10.length > 0) {
+            let gameFPS = 1000 / (this.dt.last10.reduce((acc, val) => acc + val) / this.dt.last10.length);
+            text(`Game FPS: ${gameFPS.toFixed(2)}`, 10, 30);
+        }
+        if (this.app.gameState.dt.last10.length > 0) {
+            let syncFPS = 1000 / (this.app.gameState.dt.last10.reduce((acc, val) => acc + val) / this.app.gameState.dt.last10.length);
+            text(`Sync FPS: ${syncFPS.toFixed(2)}`, 10, 60);
+        }
     }
 }
 
-class Utility {
-    static lerp(a, b, t) {
-        return a + (b - a) * t;
+class Player {
+    constructor(game) {
+        this.game = game;
+        this.game.app.gameState.events.push({
+            type: "addPlayer",
+            data: {
+                id: this.game.app.socket.id,
+                color: { r: Math.random() * 255, g: Math.random() * 255, b: Math.random() * 255 },
+            },
+        });
+    }
+
+    update() {
+        let mousePos = { x: mouseX, y: mouseY };
+        this.game.app.gameState.events.push({
+            type: "movePlayer",
+            data: { id: this.game.app.socket.id, pos: mousePos },
+        });
     }
 }
 
-*/
+function setup() {
+    createCanvas(500, 800);
+    noSmooth();
+    frameRate(GAME_FPS);
+    globals.app = new App();
+}
+
+function draw() {
+    background(0);
+    globals.app.update();
+}
