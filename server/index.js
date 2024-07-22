@@ -1,10 +1,10 @@
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import { DT, initGameState, updateGameState, cleanGameStateFromSocket } from "../common/shared.js";
+import { initGameState, updateGameState, cleanSocketFromGameState } from "../common/shared.js";
 
-const SYNC_FPS = 1;
-const GAME_FPS = 4;
+const SYNC_FPS = 30;
+const GAME_FPS = 60;
 
 let globals = {};
 
@@ -17,14 +17,14 @@ class App {
 
     constructor() {
         this.expressApp = express();
+        this.httpServer = createServer(this.expressApp);
+        this.socketServer = new Server(this.httpServer);
+
         this.expressApp.use(express.static("public"));
         this.expressApp.get("/shared.js", (req, res) => {
             res.sendFile("shared.js", { root: "common" });
         });
 
-        this.httpServer = createServer(this.expressApp);
-
-        this.socketServer = new Server(this.httpServer);
         this.socketServer.on("connection", (socket) => {
             console.log("Socket Connect: " + socket.id);
             socket.on("disconnect", () => {
@@ -38,70 +38,50 @@ class App {
         this.httpServer.listen(3000, () => {
             console.log("listening on http://localhost:3000");
             this.isListening = true;
-            this.startMainLoops();
+            this.startUpdateLoop();
         });
     }
 
-    startMainLoops() {
+    startUpdateLoop() {
         setInterval(() => {
             this.game.update();
         }, 1000 / GAME_FPS);
 
         setInterval(() => {
-            this.game.gameState.sendSyncState();
+            this.game.syncState();
         }, 1000 / SYNC_FPS);
     }
 }
 
 class Game {
     app;
-    gameState;
-    dt;
+    state;
+    events;
 
     constructor(app) {
         this.app = app;
-        this.gameState = new GameState(this);
-        this.dt = new DT();
+        this.state = initGameState();
+        this.events = [];
 
         this.app.socketServer.on("connection", (socket) => {
+            socket.on("events", (events) => {
+                for (const event of events) this.events.push(event);
+            });
+
             socket.on("disconnect", () => {
-                console.log("Socket Disconnect: " + socket.id);
-                cleanGameStateFromSocket(this.gameState, socket.id);
+                cleanSocketFromGameState(this.state, socket.id);
             });
         });
     }
 
     update() {
         if (!this.app.isListening) return;
-        this.dt.update();
-        updateGameState(this.dt.current, this.gameState);
-        this.gameState.data.serverTimestamps.push({ date: Date.now(), gameTime: this.gameState.data.worldTime });
-        this.gameState.events = [];
-    }
-}
-
-class GameState {
-    game;
-    data;
-    events;
-
-    constructor(game) {
-        this.game = game;
-        initGameState(this);
-
-        this.game.app.socketServer.on("connection", (socket) => {
-            socket.on("events", (events) => {
-                this.onReceiveEvents(events);
-            });
-        });
+        updateGameState(this.state, this.events);
+        this.events = [];
     }
 
-    onReceiveEvents(events) {
-        this.events.push(...events);
-    }
-
-    sendSyncState() {
-        this.game.app.socketServer.emit("syncState", this.data);
+    syncState() {
+        this.app.socketServer.emit("syncState", this.state);
     }
 }
 

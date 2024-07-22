@@ -1,54 +1,46 @@
-class DT {
-    lastTimestamp;
-    current;
-    last10;
-
-    constructor() {
-        this.lastTimestamp = Date.now();
-        this.current = null;
-        this.last10 = [];
-    }
-
-    update() {
-        let now = Date.now();
-        this.current = (now - this.lastTimestamp) / 1000;
-        this.lastTimestamp = now;
-        this.last10.push(this.current);
-        if (this.last10.length > 10) this.last10.shift();
-    }
+class Constants {
+    static GROUND_POS = 650;
+    static PLAYER_SIZE = 50;
 }
 
-function initGameState(gameState) {
-    gameState.data = {
+function initGameState() {
+    return {
+        worldTimeStart: Date.now(),
         worldTime: 0,
-        serverTimestamps: [],
         players: {},
     };
-    gameState.events = [];
 }
 
-function updateGameState(dt, gameState) {
-    gameState.data.worldTime += dt;
+function reconcileGameState(localState, serverState) {
+    return serverState;
+}
+
+function updateGameState(state, events) {
+    const newWorldTime = Date.now() - state.worldTimeStart;
+    const dt = (newWorldTime - state.worldTime) / 1000;
+    state.worldTime = newWorldTime;
 
     // Consider receiving multiple movement input events from 1 player:
     // - Input, Input, Stop, Stop, Stop
     // This is not handled properly here however needs to be.
 
-    for (let event of gameState.events) {
+    // Process events
+    for (let event of events) {
         switch (event.type) {
             case "playerAdd":
-                gameState.data.players[event.data.id] = {
+                state.players[event.data.id] = {
                     pos: event.data.pos,
                     inputDir: 0,
                     inputJump: false,
                     color: event.data.color,
                     vel: { x: 0, y: 0 },
+                    isGrounded: false,
                 };
                 break;
 
             case "playerInput":
-                if (!gameState.data.players[event.data.id]) return;
-                let player = gameState.data.players[event.data.id];
+                if (!state.players[event.data.id]) return;
+                let player = state.players[event.data.id];
                 player.inputDir = event.data.inputDir;
                 player.inputJump = event.data.inputJump;
                 break;
@@ -56,55 +48,52 @@ function updateGameState(dt, gameState) {
     }
 
     // Update player physics
-    for (let id in gameState.data.players) {
-        let player = gameState.data.players[id];
+    for (let id in state.players) {
+        let player = state.players[id];
 
-        // Jump player if on ground
         if (player.inputJump) {
-            if (player.pos.y >= 650) player.vel.y = -500;
+            if (player.isGrounded) player.vel.y = -500;
             player.inputJump = false;
         }
 
-        // Accelerate player towards inputDir
         if (player.inputDir != 0 && Math.abs(player.vel.x) < 350) {
             player.vel.x += dt * 8000 * player.inputDir;
-        }
-
-        // Decelerate player if not moving or over max speed
-        else {
-            player.vel.x += dt * 8000 * -Math.sign(player.vel.x);
+        } else {
+            const decel = Math.min(Math.abs(player.vel.x), dt * 8000);
+            player.vel.x += -decel * Math.sign(player.vel.x);
             if (Math.abs(player.vel.x) < 10) player.vel.x = 0;
         }
 
-        // Apply gravity
-        player.vel.y += dt * 2000;
+        if (!player.isGrounded) {
+            player.vel.y += dt * 2000;
+        }
 
-        // Apply velocity to position
         player.pos.x += player.vel.x * dt;
         player.pos.y += player.vel.y * dt;
 
-        // Collision with ground
-        if (player.pos.y > 650) {
-            player.pos.y = 650;
+        player.isGrounded = player.pos.y == Constants.GROUND_POS;
+        if (player.pos.y > Constants.GROUND_POS) {
+            player.pos.y = Constants.GROUND_POS;
+            player.isGrounded = true;
             player.vel.y = 0;
         }
     }
 }
 
-function cleanGameStateFromSocket(gameState, socketID) {
-    console.log("Cleaning data for socket: ", socketID);
-    if (gameState.data.players[socketID]) {
-        delete gameState.data.players[socketID];
+function cleanSocketFromGameState(state, socketID) {
+    if (state.players[socketID]) {
+        delete state.players[socketID];
     }
 }
 
 // ----------------- Agnostic module export -----------------
 
 if (typeof window !== "undefined") {
-    window.DT = DT;
+    window.Constants = Constants;
     window.initGameState = initGameState;
+    window.reconcileGameState = reconcileGameState;
     window.updateGameState = updateGameState;
-    window.cleanGameStateFromSocket = cleanGameStateFromSocket;
+    window.cleanSocketFromGameState = cleanSocketFromGameState;
 }
 
-export { DT, initGameState, updateGameState, cleanGameStateFromSocket };
+export { Constants, initGameState, reconcileGameState, updateGameState, cleanSocketFromGameState };
