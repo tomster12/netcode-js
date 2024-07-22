@@ -1,4 +1,4 @@
-const GAME_FPS = 120;
+const GAME_FPS = 2;
 
 let globals = {};
 
@@ -37,12 +37,16 @@ class Game {
     gameState;
     dt;
     player;
+    gameStartTime;
+    timestamps;
 
     constructor(app) {
         this.app = app;
         this.gameState = new GameState(this);
         this.dt = new DT();
         this.player = new Player(this);
+        this.gameStartTime = Date.now();
+        this.timestamps = [];
     }
 
     update() {
@@ -50,7 +54,9 @@ class Game {
         this.dt.update();
         this.player.update();
         updateGameState(this.dt.current, this.gameState);
+        this.timestamps.push({ date: Date.now(), gameTime: this.gameState.data.worldTime });
         this.gameState.sendEvents();
+        this.gameState.events = [];
     }
 
     render() {
@@ -73,17 +79,48 @@ class Game {
             let averageSyncDT = this.gameState.dt.last10.reduce((acc, val) => acc + val) / this.gameState.dt.last10.length;
             text(`Sync FPS: ${(1 / averageSyncDT).toFixed(2)}`, 10, 60);
         }
+
+        if (this.gameState.data.serverTimestamps.length > 0) {
+            stroke(200);
+            line(0, 100, width, 100);
+            line(0, 700, width, 700);
+
+            noStroke();
+            let ref = this.gameState.data.serverTimestamps[0].date;
+            fill(255, 200, 200);
+            for (const ts of this.gameState.data.serverTimestamps) {
+                const x = map(ts.date - ref, 0, 5 * 1000, 0, width);
+                const y = map(ts.gameTime, 0, 5, 100, 700);
+                ellipse(x, y, 12);
+            }
+            fill(200, 200, 255);
+            for (const ts of this.gameState.syncTimestamps) {
+                const x = map(ts.date - ref, 0, 5 * 1000, 0, width);
+                const y = map(ts.gameTime, 0, 5, 100, 700);
+                ellipse(x, y, 12);
+            }
+            fill(200, 255, 200);
+            for (const ts of this.timestamps) {
+                const x = map(ts.date - ref, 0, 5 * 1000, 0, width);
+                const y = map(ts.gameTime, 0, 5, 100, 700);
+                ellipse(x, y, 7);
+            }
+            const gsX = map(this.gameStartTime - ref, 0, 5 * 1000, 0, width);
+            ellipse(gsX, 100, 10);
+        }
     }
 }
 
 class GameState {
     game;
     dt;
+    syncTimestamps;
 
     constructor(game) {
         this.game = game;
         initGameState(this);
         this.dt = new DT();
+        this.syncTimestamps = [];
 
         this.game.app.socket.on("syncState", (data) => {
             this.onReceiveSyncState(data);
@@ -93,12 +130,12 @@ class GameState {
     sendEvents() {
         if (this.events.length === 0) return;
         this.game.app.socket.emit("events", this.events);
-        this.events = [];
     }
 
     onReceiveSyncState(data) {
         this.data = data;
         this.dt.update();
+        this.syncTimestamps.push({ date: Date.now(), gameTime: this.data.worldTime });
     }
 }
 
@@ -110,7 +147,7 @@ class Player {
                 type: "playerAdd",
                 data: {
                     id: this.game.app.socket.id,
-                    pos: { x: Math.random() * width, y: height / 2 },
+                    pos: { x: Math.random() * width, y: height },
                     color: { r: Math.random() * 255, g: Math.random() * 255, b: Math.random() * 255 },
                 },
             });

@@ -3,8 +3,8 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import { DT, initGameState, updateGameState, cleanGameStateFromSocket } from "../common/shared.js";
 
-const SYNC_FPS = 40;
-const GAME_FPS = 120;
+const SYNC_FPS = 1;
+const GAME_FPS = 4;
 
 let globals = {};
 
@@ -75,6 +75,7 @@ class Game {
         if (!this.app.isListening) return;
         this.dt.update();
         updateGameState(this.dt.current, this.gameState);
+        this.gameState.data.serverTimestamps.push({ date: Date.now(), gameTime: this.gameState.data.worldTime });
         this.gameState.events = [];
     }
 }

@@ -4,7 +4,7 @@ class DT {
     last10;
 
     constructor() {
-        this.lastTimestamp = 0;
+        this.lastTimestamp = Date.now();
         this.current = null;
         this.last10 = [];
     }
@@ -21,6 +21,7 @@ class DT {
 function initGameState(gameState) {
     gameState.data = {
         worldTime: 0,
+        serverTimestamps: [],
         players: {},
     };
     gameState.events = [];
