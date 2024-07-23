@@ -1,5 +1,5 @@
 {
-    "name": "rollback-netcode-js",
+    "name": "netcode-js",
     "type": "module",
     "version": "0.0.1",
     "scripts": {
