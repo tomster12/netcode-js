@@ -27,10 +27,19 @@ class Constants {
 }
 
 class GameEvents {
-    static newPlayerAddEvent(id, pos, color) {
+    static newPlayerAdd(id, pos, color) {
         return {
+            stateTime: Date.now(),
             type: "playerAdd",
             data: { id, pos, color },
+        };
+    }
+
+    static newPlayerInputChange(id, inputDir, inputJump) {
+        return {
+            stateTime: Date.now(),
+            type: "playerInputChange",
+            data: { id, inputDir, inputJump },
         };
     }
 }
@@ -38,24 +47,32 @@ class GameEvents {
 class GameState {
     static initState() {
         return {
+            epochTime: Date.now(),
             stateTime: Date.now(),
             players: {},
         };
     }
 
     static reconcileState(localState, remoteState) {
+        // console.log(`Reconciling state: ${localState.stateTime - remoteState.epochTime} -> ${remoteState.stateTime - localState.epochTime}`);
         return remoteState;
     }
 
     static updateState(state, events) {
-        const dt = (Date.now() - state.worldTime) / 1000;
-        state.worldTime = Date.now();
+        const dt = (Date.now() - state.stateTime) / 1000;
+
+        // ----------------- Handle Events -----------------
 
         // Consider receiving multiple movement input events from 1 player:
         // - Input, Input, Stop, Stop, Stop
         // This is not handled properly here however needs to be.
 
         for (let event of events) {
+            if (event.stateTime < state.stateTime) {
+                console.log(`Received event from the past: ${event.stateTime - state.epochTime} < ${state.stateTime - state.epochTime}`);
+                continue;
+            }
+
             switch (event.type) {
                 case "playerAdd":
                     state.players[event.data.id] = {
@@ -68,7 +85,7 @@ class GameState {
                     };
                     break;
 
-                case "playerInput":
+                case "playerInputChange":
                     if (!state.players[event.data.id]) return;
                     let player = state.players[event.data.id];
                     player.inputDir = event.data.inputDir;
@@ -76,6 +93,8 @@ class GameState {
                     break;
             }
         }
+
+        // ----------------- Simulate World -----------------
 
         for (let id in state.players) {
             let player = state.players[id];
@@ -107,6 +126,8 @@ class GameState {
                 player.vel.y = 0;
             }
         }
+
+        state.stateTime = Date.now();
     }
 
     static cleanSocketFromState(state, socketID) {

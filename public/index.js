@@ -56,7 +56,7 @@ class Game {
 
             const pos = { x: Math.random() * width, y: height };
             const color = { r: 100 + Math.random() * 155, g: 100 + Math.random() * 155, b: 100 + Math.random() * 155 };
-            socket.emit("events", [GameEvents.newPlayerAddEvent(socket.id, pos, color)]);
+            socket.emit("events", [GameEvents.newPlayerAdd(socket.id, pos, color)]);
         });
     }
 
@@ -96,23 +96,22 @@ class Game {
 class Player {
     constructor(game) {
         this.game = game;
+        this.inputDir = 0;
+        this.inputJump = false;
     }
 
     update() {
-        let inputDir = 0;
-        let inputJump = false;
-        if (keyIsDown(LEFT_ARROW) || keyIsDown(65)) inputDir -= 1;
-        if (keyIsDown(RIGHT_ARROW) || keyIsDown(68)) inputDir += 1;
-        if (keyIsDown(UP_ARROW) || keyIsDown(87) || keyIsDown(32)) inputJump = true;
+        let newInputDir = 0;
+        let newInputJump = false;
+        if (keyIsDown(LEFT_ARROW) || keyIsDown(65)) newInputDir -= 1;
+        if (keyIsDown(RIGHT_ARROW) || keyIsDown(68)) newInputDir += 1;
+        if (keyIsDown(UP_ARROW) || keyIsDown(87) || keyIsDown(32)) newInputJump = true;
 
-        this.game.events.push({
-            type: "playerInput",
-            data: {
-                id: this.game.app.socket.id,
-                inputDir,
-                inputJump,
-            },
-        });
+        if (newInputDir != this.inputDir || newInputJump != this.inputJump) {
+            this.inputDir = newInputDir;
+            this.inputJump = newInputJump;
+            this.game.events.push(GameEvents.newPlayerInputChange(this.game.app.socket.id, this.inputDir, this.inputJump));
+        }
     }
 }
 
