@@ -54,23 +54,32 @@ class EventBus {
 
 class LockstepClient {
     socket;
+    eventBus;
     events;
     frame;
+    syncDT;
 
-    constructor(socket) {
+    constructor(socket, updateState) {
         this.socket = socket;
+        this.updateState = updateState;
         this.eventBus = new EventBus();
         this.events = [];
         this.frame = 0;
+        this.syncDT = new DT();
+        this.canUpdate = false;
 
         this.socket.on("initFrame", (data) => {
             this.frame = data.frame;
-            this.eventBus.emit("initFrame", data.clientEventHistory);
+            this.syncDT.reset();
+            for (const clientEvents of data.clientEventHistory) this.updateState(clientEvents);
+            this.canUpdate = true;
         });
 
         this.socket.on("syncFrame", (data) => {
             this.frame = data.frame;
-            this.eventBus.emit("syncFrame", data.clientEvents);
+            this.syncDT.set();
+            this.updateState(data.clientEvents);
+            this.canUpdate = true;
         });
     }
 
@@ -81,6 +90,7 @@ class LockstepClient {
     sendEvents() {
         this.socket.emit("syncEvents", { frame: this.frame, events: this.events });
         this.events = [];
+        this.canUpdate = false;
     }
 }
 

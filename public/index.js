@@ -3,13 +3,11 @@ const APP_FPS = 60;
 let globals = {};
 
 class App {
-    isConnected;
     eventBus;
     socket;
     game;
 
     constructor() {
-        this.isConnected = false;
         this.eventBus = new EventBus();
         this.socket = io();
         this.game = new Game(this);
@@ -17,19 +15,18 @@ class App {
         console.log("Connecting to server...");
         this.socket.on("connect", () => {
             console.log("Socket Connected: " + this.socket.id);
-            this.isConnected = true;
             this.eventBus.emit("connect", this.socket);
 
             this.socket.on("disconnect", () => {
                 console.log("Socket Disconnected");
-                this.isConnected = false;
                 this.eventBus.emit("disconnect", this.socket);
             });
         });
     }
 
     draw() {
-        this.game.draw();
+        this.game.update();
+        this.game.render();
     }
 }
 
@@ -47,35 +44,18 @@ class Game {
     app;
     state;
     client;
-    toUpdate;
-    syncTimer;
 
     constructor(app) {
         this.app = app;
 
         this.app.eventBus.on("connect", () => {
             this.state = { players: {} };
-            this.client = new LockstepClient(this.app.socket);
-            this.toUpdate = false;
-            this.syncTimer = new DT();
-
-            this.client.eventBus.on("initFrame", (clientEventHistory) => {
-                for (const clientEvents of clientEventHistory) this.updateState(clientEvents);
-                this.toUpdate = true;
-                this.syncTimer.reset();
-            });
-
-            this.client.eventBus.on("syncFrame", (clientEvents) => {
-                this.updateState(clientEvents);
-                this.toUpdate = true;
-                this.syncTimer.set();
-            });
+            this.client = new LockstepClient(this.app.socket, this.updateState.bind(this));
         });
 
         this.app.eventBus.on("disconnect", () => {
             this.state = { players: {} };
             this.client = null;
-            this.toUpdate = false;
         });
     }
 
@@ -142,21 +122,14 @@ class Game {
         }
     }
 
-    draw() {
-        if (this.toUpdate) {
-            this.handleEvents();
-            this.client.sendEvents();
-            this.toUpdate = false;
-        }
+    update() {
+        if (!this.client || !this.client.canUpdate) return;
 
-        this.render();
-    }
-
-    handleEvents() {
         if (!this.state.players[this.app.socket.id]) {
             const pos = { x: 100, y: 100 };
             const color = { r: Math.floor(Math.random() * 255), g: Math.floor(Math.random() * 255), b: Math.floor(Math.random() * 255) };
             this.client.addEvent(GameEvent.playerConnect(pos, color));
+            this.client.sendEvents();
             return;
         }
 
@@ -166,12 +139,11 @@ class Game {
         if (keyIsDown(RIGHT_ARROW) || keyIsDown(68)) inputDir += 1;
         if (keyIsDown(UP_ARROW) || keyIsDown(87) || keyIsDown(32)) inputJump = true;
         this.client.addEvent(GameEvent.playerInputChange(inputDir, inputJump));
+        this.client.sendEvents();
     }
 
     render() {
-        if (!this.state) return;
-
-        background(0);
+        if (!this.client) return;
 
         noStroke();
         for (let id in this.state.players) {
@@ -181,7 +153,7 @@ class Game {
         }
 
         fill(255);
-        const syncFPS = 1000 / this.syncTimer.getAverage();
+        const syncFPS = 1000 / this.client.syncDT.getAverage();
         text("Sync FPS: " + syncFPS.toFixed(2), 10, 20);
     }
 }
