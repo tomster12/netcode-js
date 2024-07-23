@@ -1,4 +1,35 @@
-class ListenBus {
+class DT {
+    constructor() {
+        this.time = Date.now();
+        this.dt = 0;
+        this.dtHistory = [];
+    }
+
+    reset() {
+        this.time = Date.now();
+        this.dt = 0;
+        this.dtHistory = [];
+    }
+
+    set() {
+        const now = Date.now();
+        this.dt = now - this.time;
+        this.time = now;
+        this.dtHistory.push(this.dt);
+        if (this.dtHistory.length > 50) this.dtHistory.shift();
+    }
+
+    getAverage() {
+        if (this.dtHistory.length == 0) return 0;
+        return this.dtHistory.reduce((a, b) => a + b, 0) / this.dtHistory.length;
+    }
+
+    getLast() {
+        return this.dt;
+    }
+}
+
+class EventBus {
     constructor() {
         this.listeners = {};
     }
@@ -21,129 +52,99 @@ class ListenBus {
     }
 }
 
-class Constants {
-    static GROUND_POS = 650;
-    static PLAYER_SIZE = 50;
+class LockstepClient {
+    socket;
+    events;
+    frame;
+
+    constructor(socket) {
+        this.socket = socket;
+        this.eventBus = new EventBus();
+        this.events = [];
+        this.frame = 0;
+
+        this.socket.on("initFrame", (data) => {
+            this.frame = data.frame;
+            this.eventBus.emit("initFrame", data.clientEventHistory);
+        });
+
+        this.socket.on("syncFrame", (data) => {
+            this.frame = data.frame;
+            this.eventBus.emit("syncFrame", data.clientEvents);
+        });
+    }
+
+    addEvent(event) {
+        this.events.push(event);
+    }
+
+    sendEvents() {
+        this.socket.emit("syncEvents", { frame: this.frame, events: this.events });
+        this.events = [];
+    }
 }
 
-class GameEvents {
-    static newPlayerAdd(id, pos, color) {
-        return {
-            stateTime: Date.now(),
-            type: "playerAdd",
-            data: { id, pos, color },
-        };
+class LockstepServer {
+    socketServer;
+    connectedClients;
+    currentFrame;
+    currentClientEvents;
+    clientEventHistory;
+
+    constructor(socketServer) {
+        this.socketServer = socketServer;
+        this.connectedClients = [];
+        this.currentFrame = 0;
+        this.currentClientEvents = {};
+        this.clientEventHistory = [];
+
+        this.socketServer.on("connection", (socket) => {
+            console.log(`Client connected: ${socket.id}`);
+            this.connectedClients.push(socket);
+
+            socket.emit("initFrame", {
+                frame: this.currentFrame,
+                clientEventHistory: this.clientEventHistory,
+            });
+
+            socket.on("syncEvents", (data) => {
+                if (data.frame != this.currentFrame) console.warn(`Out of sync frame: ${data.frame} != ${this.currentFrame}`);
+                if (this.currentClientEvents[socket.id]) console.error(`Already received events for client: ${socket.id}`);
+                this.currentClientEvents[socket.id] = data.events;
+                this.nextFrame();
+            });
+
+            socket.on("disconnect", () => {
+                console.log(`Client disconnected: ${socket.id}`);
+                this.connectedClients = this.connectedClients.filter((client) => client != socket);
+                this.currentClientEvents[socket.id] = [{ type: "playerDisconnect" }];
+                this.nextFrame();
+            });
+        });
     }
 
-    static newPlayerInputChange(id, inputDir, inputJump) {
-        return {
-            stateTime: Date.now(),
-            type: "playerInputChange",
-            data: { id, inputDir, inputJump },
-        };
-    }
-}
+    nextFrame() {
+        const finished = this.connectedClients.every((client) => this.currentClientEvents[client.id]);
+        if (!finished) return;
 
-class GameState {
-    static initState() {
-        return {
-            epochTime: Date.now(),
-            stateTime: Date.now(),
-            players: {},
-        };
-    }
+        this.currentFrame += 1;
+        const data = { frame: this.currentFrame, clientEvents: this.currentClientEvents };
+        this.connectedClients.forEach((client) => {
+            client.emit("syncFrame", data);
+        });
 
-    static reconcileState(localState, remoteState) {
-        // console.log(`Reconciling state: ${localState.stateTime - remoteState.epochTime} -> ${remoteState.stateTime - localState.epochTime}`);
-        return remoteState;
-    }
-
-    static updateState(state, events) {
-        const dt = (Date.now() - state.stateTime) / 1000;
-
-        // ----------------- Handle Events -----------------
-
-        // Consider receiving multiple movement input events from 1 player:
-        // - Input, Input, Stop, Stop, Stop
-        // This is not handled properly here however needs to be.
-
-        for (let event of events) {
-            if (event.stateTime < state.stateTime) {
-                console.log(`Received event from the past: ${event.stateTime - state.epochTime} < ${state.stateTime - state.epochTime}`);
-                continue;
-            }
-
-            switch (event.type) {
-                case "playerAdd":
-                    state.players[event.data.id] = {
-                        pos: event.data.pos,
-                        inputDir: 0,
-                        inputJump: false,
-                        color: event.data.color,
-                        vel: { x: 0, y: 0 },
-                        isGrounded: false,
-                    };
-                    break;
-
-                case "playerInputChange":
-                    if (!state.players[event.data.id]) return;
-                    let player = state.players[event.data.id];
-                    player.inputDir = event.data.inputDir;
-                    player.inputJump = event.data.inputJump;
-                    break;
-            }
-        }
-
-        // ----------------- Simulate World -----------------
-
-        for (let id in state.players) {
-            let player = state.players[id];
-
-            if (player.inputJump) {
-                if (player.isGrounded) player.vel.y = -500;
-                player.inputJump = false;
-            }
-
-            if (player.inputDir != 0 && Math.abs(player.vel.x) < 350) {
-                player.vel.x += dt * 8000 * player.inputDir;
-            } else {
-                const decel = Math.min(Math.abs(player.vel.x), dt * 8000);
-                player.vel.x += -decel * Math.sign(player.vel.x);
-                if (Math.abs(player.vel.x) < 10) player.vel.x = 0;
-            }
-
-            if (!player.isGrounded) {
-                player.vel.y += dt * 2000;
-            }
-
-            player.pos.x += player.vel.x * dt;
-            player.pos.y += player.vel.y * dt;
-
-            player.isGrounded = player.pos.y == Constants.GROUND_POS;
-            if (player.pos.y > Constants.GROUND_POS) {
-                player.pos.y = Constants.GROUND_POS;
-                player.isGrounded = true;
-                player.vel.y = 0;
-            }
-        }
-
-        state.stateTime = Date.now();
-    }
-
-    static cleanSocketFromState(state, socketID) {
-        if (state.players[socketID]) {
-            delete state.players[socketID];
-        }
+        this.clientEventHistory.push(this.currentClientEvents);
+        this.currentClientEvents = {};
     }
 }
 
 // ----------------- Agnostic module export -----------------
 
 if (typeof window !== "undefined") {
-    window.Constants = Constants;
-    window.ListenBus = ListenBus;
-    window.GameEvents = GameEvents;
-    window.GameState = GameState;
+    window.DT = DT;
+    window.EventBus = EventBus;
+    window.LockstepClient = LockstepClient;
+    window.LockstepServer = LockstepServer;
 }
 
-export { Constants, ListenBus, GameEvents, GameState };
+export { DT, EventBus, LockstepClient, LockstepServer };

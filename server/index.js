@@ -1,10 +1,7 @@
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import { GameState } from "../common/shared.js";
-
-const SYNC_FPS = 30;
-const GAME_FPS = 60;
+import { LockstepServer } from "../common/shared.js";
 
 let globals = {};
 
@@ -13,7 +10,7 @@ class App {
     expressApp;
     httpServer;
     socketServer;
-    game;
+    lockstepServer;
 
     constructor() {
         this.expressApp = express();
@@ -25,63 +22,12 @@ class App {
             res.sendFile("shared.js", { root: "common" });
         });
 
-        this.socketServer.on("connection", (socket) => {
-            console.log("Socket Connect: " + socket.id);
-            socket.on("disconnect", () => {
-                console.log("Socket Disconnect: " + socket.id);
-            });
-        });
-
-        this.game = new Game(this);
+        this.lockstepServer = new LockstepServer(this.socketServer);
 
         console.log("Starting server...");
         this.httpServer.listen(3000, () => {
             console.log("listening on http://localhost:3000");
-            this.isListening = true;
-            this.startUpdateLoop();
         });
-    }
-
-    startUpdateLoop() {
-        setInterval(() => {
-            this.game.update();
-        }, 1000 / GAME_FPS);
-
-        setInterval(() => {
-            this.game.syncState();
-        }, 1000 / SYNC_FPS);
-    }
-}
-
-class Game {
-    app;
-    state;
-    events;
-
-    constructor(app) {
-        this.app = app;
-        this.state = GameState.initState();
-        this.events = [];
-
-        this.app.socketServer.on("connection", (socket) => {
-            socket.on("events", (events) => {
-                for (const event of events) this.events.push(event);
-            });
-
-            socket.on("disconnect", () => {
-                GameState.cleanSocketFromState(this.state, socket.id);
-            });
-        });
-    }
-
-    update() {
-        if (!this.app.isListening) return;
-        GameState.updateState(this.state, this.events);
-        this.events = [];
-    }
-
-    syncState() {
-        this.app.socketServer.emit("syncState", this.state);
     }
 }
 

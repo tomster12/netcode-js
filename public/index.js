@@ -1,16 +1,16 @@
-const GAME_FPS = 60;
+const APP_FPS = 60;
 
 let globals = {};
 
 class App {
     isConnected;
-    events;
+    eventBus;
     socket;
     game;
 
     constructor() {
         this.isConnected = false;
-        this.events = new ListenBus();
+        this.eventBus = new EventBus();
         this.socket = io();
         this.game = new Game(this);
 
@@ -18,111 +18,182 @@ class App {
         this.socket.on("connect", () => {
             console.log("Socket Connected: " + this.socket.id);
             this.isConnected = true;
-            this.events.emit("connect", this.socket);
+            this.eventBus.emit("connect", this.socket);
 
             this.socket.on("disconnect", () => {
-                console.log("Socket Disconnected: " + this.socket.id);
+                console.log("Socket Disconnected");
                 this.isConnected = false;
-                this.events.emit("disconnect", this.socket);
+                this.eventBus.emit("disconnect", this.socket);
             });
         });
     }
 
-    update() {
-        this.game.update();
-        this.game.render();
+    draw() {
+        this.game.draw();
+    }
+}
+
+class GameEvent {
+    static playerConnect(pos, color) {
+        return { type: "playerConnect", data: { pos, color } };
+    }
+
+    static playerInputChange(inputDir, inputJump) {
+        return { type: "playerInputChange", data: { inputDir, inputJump } };
     }
 }
 
 class Game {
     app;
-    isInitialized;
     state;
-    events;
-    player;
+    client;
+    toUpdate;
+    syncTimer;
 
     constructor(app) {
         this.app = app;
-        this.isInitialized = false;
-        this.state = null;
-        this.events = [];
 
-        this.app.events.on("connect", (socket) => {
-            this.app.socket.on("syncState", (data) => {
-                if (!this.state) this.state = data;
-                else this.state = GameState.reconcileState(this.state, data);
-                if (!this.isInitialized && this.state.players[this.app.socket.id]) this.initGame();
+        this.app.eventBus.on("connect", () => {
+            this.state = { players: {} };
+            this.client = new LockstepClient(this.app.socket);
+            this.toUpdate = false;
+            this.syncTimer = new DT();
+
+            this.client.eventBus.on("initFrame", (clientEventHistory) => {
+                for (const clientEvents of clientEventHistory) this.updateState(clientEvents);
+                this.toUpdate = true;
+                this.syncTimer.reset();
             });
 
-            const pos = { x: Math.random() * width, y: height };
-            const color = { r: 100 + Math.random() * 155, g: 100 + Math.random() * 155, b: 100 + Math.random() * 155 };
-            socket.emit("events", [GameEvents.newPlayerAdd(socket.id, pos, color)]);
+            this.client.eventBus.on("syncFrame", (clientEvents) => {
+                this.updateState(clientEvents);
+                this.toUpdate = true;
+                this.syncTimer.set();
+            });
+        });
+
+        this.app.eventBus.on("disconnect", () => {
+            this.state = { players: {} };
+            this.client = null;
+            this.toUpdate = false;
         });
     }
 
-    initGame() {
-        this.player = new Player(this);
-        this.isInitialized = true;
-    }
+    updateState(clientEvents) {
+        for (const client in clientEvents) {
+            for (const event of clientEvents[client]) {
+                switch (event.type) {
+                    case "playerConnect":
+                        this.state.players[client] = {
+                            pos: event.data.pos,
+                            inputDir: 0,
+                            inputJump: false,
+                            color: event.data.color,
+                            vel: { x: 0, y: 0 },
+                            isGrounded: false,
+                        };
+                        break;
 
-    update() {
-        if (!this.isInitialized) return;
-        this.player.update();
-        GameState.updateState(this.state, this.events);
-        if (this.events != []) this.app.socket.emit("events", this.events);
-        this.events = [];
-    }
+                    case "playerInputChange":
+                        let player = this.state.players[client];
+                        player.inputDir = event.data.inputDir;
+                        player.inputJump = event.data.inputJump;
+                        break;
 
-    render() {
-        background(0);
-
-        if (!this.isInitialized) {
-            fill(255);
-            textAlign(CENTER, CENTER);
-            textSize(32);
-            text("Connecting...", width / 2, height / 2);
-            return;
+                    case "playerDisconnect":
+                        delete this.state.players[client];
+                        break;
+                }
+            }
         }
+
+        const DT = 1 / APP_FPS;
+        const GROUND_POS = 600;
 
         for (let id in this.state.players) {
             let player = this.state.players[id];
+
+            if (player.inputJump) {
+                if (player.isGrounded) player.vel.y = -500;
+                player.inputJump = false;
+            }
+
+            if (player.inputDir != 0 && Math.abs(player.vel.x) < 350) {
+                player.vel.x += DT * 8000 * player.inputDir;
+            } else {
+                const decel = Math.min(Math.abs(player.vel.x), DT * 8000);
+                player.vel.x += -decel * Math.sign(player.vel.x);
+                if (Math.abs(player.vel.x) < 10) player.vel.x = 0;
+            }
+
+            if (!player.isGrounded) {
+                player.vel.y += DT * 2000;
+            }
+
+            player.pos.x += player.vel.x * DT;
+            player.pos.y += player.vel.y * DT;
+
+            player.isGrounded = player.pos.y == GROUND_POS;
+            if (player.pos.y > GROUND_POS) {
+                player.pos.y = GROUND_POS;
+                player.isGrounded = true;
+                player.vel.y = 0;
+            }
+        }
+    }
+
+    draw() {
+        if (this.toUpdate) {
+            this.handleEvents();
+            this.client.sendEvents();
+            this.toUpdate = false;
+        }
+
+        this.render();
+    }
+
+    handleEvents() {
+        if (!this.state.players[this.app.socket.id]) {
+            const pos = { x: 100, y: 100 };
+            const color = { r: Math.floor(Math.random() * 255), g: Math.floor(Math.random() * 255), b: Math.floor(Math.random() * 255) };
+            this.client.addEvent(GameEvent.playerConnect(pos, color));
+            return;
+        }
+
+        let inputDir = 0;
+        let inputJump = false;
+        if (keyIsDown(LEFT_ARROW) || keyIsDown(65)) inputDir -= 1;
+        if (keyIsDown(RIGHT_ARROW) || keyIsDown(68)) inputDir += 1;
+        if (keyIsDown(UP_ARROW) || keyIsDown(87) || keyIsDown(32)) inputJump = true;
+        this.client.addEvent(GameEvent.playerInputChange(inputDir, inputJump));
+    }
+
+    render() {
+        if (!this.state) return;
+
+        background(0);
+
+        noStroke();
+        for (let id in this.state.players) {
+            let player = this.state.players[id];
             fill(player.color.r, player.color.g, player.color.b);
-            noStroke();
-            ellipse(player.pos.x, player.pos.y, Constants.PLAYER_SIZE);
+            ellipse(player.pos.x, player.pos.y, 30);
         }
-    }
-}
 
-class Player {
-    constructor(game) {
-        this.game = game;
-        this.inputDir = 0;
-        this.inputJump = false;
-    }
-
-    update() {
-        let newInputDir = 0;
-        let newInputJump = false;
-        if (keyIsDown(LEFT_ARROW) || keyIsDown(65)) newInputDir -= 1;
-        if (keyIsDown(RIGHT_ARROW) || keyIsDown(68)) newInputDir += 1;
-        if (keyIsDown(UP_ARROW) || keyIsDown(87) || keyIsDown(32)) newInputJump = true;
-
-        if (newInputDir != this.inputDir || newInputJump != this.inputJump) {
-            this.inputDir = newInputDir;
-            this.inputJump = newInputJump;
-            this.game.events.push(GameEvents.newPlayerInputChange(this.game.app.socket.id, this.inputDir, this.inputJump));
-        }
+        fill(255);
+        const syncFPS = 1000 / this.syncTimer.getAverage();
+        text("Sync FPS: " + syncFPS.toFixed(2), 10, 20);
     }
 }
 
 function setup() {
     createCanvas(800, 800);
     noSmooth();
-    frameRate(GAME_FPS);
+    frameRate(APP_FPS);
     globals.app = new App();
 }
 
 function draw() {
     background(0);
-    globals.app.update();
+    globals.app.draw();
 }
