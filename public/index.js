@@ -4,11 +4,13 @@ let globals = {};
 
 class App {
     isConnected;
+    events;
     socket;
     game;
 
     constructor() {
         this.isConnected = false;
+        this.events = new ListenBus();
         this.socket = io();
         this.game = new Game(this);
 
@@ -16,16 +18,17 @@ class App {
         this.socket.on("connect", () => {
             console.log("Socket Connected: " + this.socket.id);
             this.isConnected = true;
+            this.events.emit("connect", this.socket);
 
             this.socket.on("disconnect", () => {
                 console.log("Socket Disconnected: " + this.socket.id);
                 this.isConnected = false;
+                this.events.emit("disconnect", this.socket);
             });
         });
     }
 
     update() {
-        if (!this.isConnected) return;
         this.game.update();
         this.game.render();
     }
@@ -33,31 +36,53 @@ class App {
 
 class Game {
     app;
+    isInitialized;
     state;
     events;
     player;
 
     constructor(app) {
         this.app = app;
-        this.state = initGameState();
+        this.isInitialized = false;
+        this.state = null;
         this.events = [];
-        this.player = new Player(this);
 
-        this.app.socket.on("syncState", (data) => {
-            this.state = reconcileGameState(this.state, data);
+        this.app.events.on("connect", (socket) => {
+            this.app.socket.on("syncState", (data) => {
+                if (!this.state) this.state = data;
+                else this.state = GameState.reconcileState(this.state, data);
+                if (!this.isInitialized && this.state.players[this.app.socket.id]) this.initGame();
+            });
+
+            const pos = { x: Math.random() * width, y: height };
+            const color = { r: 100 + Math.random() * 155, g: 100 + Math.random() * 155, b: 100 + Math.random() * 155 };
+            socket.emit("events", [GameEvents.newPlayerAddEvent(socket.id, pos, color)]);
         });
     }
 
+    initGame() {
+        this.player = new Player(this);
+        this.isInitialized = true;
+    }
+
     update() {
-        if (!this.app.isConnected) return;
+        if (!this.isInitialized) return;
         this.player.update();
-        updateGameState(this.state, this.events);
+        GameState.updateState(this.state, this.events);
         if (this.events != []) this.app.socket.emit("events", this.events);
         this.events = [];
     }
 
     render() {
         background(0);
+
+        if (!this.isInitialized) {
+            fill(255);
+            textAlign(CENTER, CENTER);
+            textSize(32);
+            text("Connecting...", width / 2, height / 2);
+            return;
+        }
 
         for (let id in this.state.players) {
             let player = this.state.players[id];
@@ -71,25 +96,9 @@ class Game {
 class Player {
     constructor(game) {
         this.game = game;
-        this.game.app.socket.on("connect", () => {
-            this.game.events.push({
-                type: "playerAdd",
-                data: {
-                    id: this.game.app.socket.id,
-                    pos: { x: Math.random() * width, y: height },
-                    color: {
-                        r: 100 + Math.random() * 155,
-                        g: 100 + Math.random() * 155,
-                        b: 100 + Math.random() * 155,
-                    },
-                },
-            });
-        });
     }
 
     update() {
-        if (!this.game.state.players[this.game.app.socket.id]) return;
-
         let inputDir = 0;
         let inputJump = false;
         if (keyIsDown(LEFT_ARROW) || keyIsDown(65)) inputDir -= 1;

@@ -1,7 +1,7 @@
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import { initGameState, updateGameState, cleanSocketFromGameState } from "../common/shared.js";
+import { GameState } from "../common/shared.js";
 
 const SYNC_FPS = 30;
 const GAME_FPS = 60;
@@ -60,7 +60,7 @@ class Game {
 
     constructor(app) {
         this.app = app;
-        this.state = initGameState();
+        this.state = GameState.initState();
         this.events = [];
 
         this.app.socketServer.on("connection", (socket) => {
@@ -69,14 +69,14 @@ class Game {
             });
 
             socket.on("disconnect", () => {
-                cleanSocketFromGameState(this.state, socket.id);
+                GameState.cleanSocketFromState(this.state, socket.id);
             });
         });
     }
 
     update() {
         if (!this.app.isListening) return;
-        updateGameState(this.state, this.events);
+        GameState.updateState(this.state, this.events);
         this.events = [];
     }
 
