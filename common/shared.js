@@ -55,41 +55,35 @@ class EventBus {
 class LockstepClient {
     socket;
     eventBus;
-    events;
-    frame;
     syncDT;
+    frame;
+    canUpdate;
 
-    constructor(socket, updateState) {
+    constructor(socket, tickFrame) {
         this.socket = socket;
-        this.updateState = updateState;
+        this.tickFrame = tickFrame;
         this.eventBus = new EventBus();
-        this.events = [];
-        this.frame = 0;
         this.syncDT = new DT();
+        this.frame = 0;
         this.canUpdate = false;
 
-        this.socket.on("initFrame", (data) => {
+        this.socket.on("frameEventHistory", (data) => {
             this.frame = data.frame;
             this.syncDT.reset();
-            for (const clientEvents of data.clientEventHistory) this.updateState(clientEvents);
+            for (const events of data.frameEventHistory) this.tickFrame(events);
             this.canUpdate = true;
         });
 
-        this.socket.on("syncFrame", (data) => {
-            this.frame = data.frame;
+        this.socket.on("serverFrameEvents", ({ frame, events }) => {
             this.syncDT.set();
-            this.updateState(data.clientEvents);
+            this.frame = frame;
+            this.tickFrame(events);
             this.canUpdate = true;
         });
     }
 
-    addEvent(event) {
-        this.events.push(event);
-    }
-
-    sendEvents() {
-        this.socket.emit("syncEvents", { frame: this.frame, events: this.events });
-        this.events = [];
+    finishFrame(events) {
+        this.socket.emit("clientFrameEvents", { frame: this.frame, events: events });
         this.canUpdate = false;
     }
 }
@@ -97,54 +91,53 @@ class LockstepClient {
 class LockstepServer {
     socketServer;
     connectedClients;
-    currentFrame;
-    currentClientEvents;
-    clientEventHistory;
+    frame;
+    frameEvents;
+    frameEventHistory;
 
     constructor(socketServer) {
         this.socketServer = socketServer;
         this.connectedClients = [];
-        this.currentFrame = 0;
-        this.currentClientEvents = {};
-        this.clientEventHistory = [];
+        this.frame = 0;
+        this.frameEvents = {};
+        this.frameEventHistory = [];
 
         this.socketServer.on("connection", (socket) => {
             console.log(`Client connected: ${socket.id}`);
             this.connectedClients.push(socket);
 
-            socket.emit("initFrame", {
-                frame: this.currentFrame,
-                clientEventHistory: this.clientEventHistory,
+            socket.emit("frameEventHistory", {
+                frame: this.frame,
+                frameEventHistory: this.frameEventHistory,
             });
 
-            socket.on("syncEvents", (data) => {
-                if (data.frame != this.currentFrame) console.warn(`Out of sync frame: ${data.frame} != ${this.currentFrame}`);
-                if (this.currentClientEvents[socket.id]) console.error(`Already received events for client: ${socket.id}`);
-                this.currentClientEvents[socket.id] = data.events;
-                this.nextFrame();
+            socket.on("clientFrameEvents", (data) => {
+                if (data.frame != this.frame) console.warn(`Out of sync frame: ${data.frame} != ${this.frame}`);
+                if (this.frameEvents[socket.id]) console.error(`Already received events for client: ${socket.id}`);
+                this.frameEvents[socket.id] = data.events;
+                this.tryTick();
             });
 
             socket.on("disconnect", () => {
                 console.log(`Client disconnected: ${socket.id}`);
                 this.connectedClients = this.connectedClients.filter((client) => client != socket);
-                this.currentClientEvents[socket.id] = [{ type: "playerDisconnect" }];
-                this.nextFrame();
+                this.frameEvents[socket.id] = [{ type: "playerDisconnect" }];
+                this.tryTick();
             });
         });
     }
 
-    nextFrame() {
-        const finished = this.connectedClients.every((client) => this.currentClientEvents[client.id]);
-        if (!finished) return;
+    tryTick() {
+        if (!this.connectedClients.every((client) => this.frameEvents[client.id])) return;
 
-        this.currentFrame += 1;
-        const data = { frame: this.currentFrame, clientEvents: this.currentClientEvents };
+        this.frame += 1;
+        const data = { frame: this.frame, events: this.frameEvents };
         this.connectedClients.forEach((client) => {
-            client.emit("syncFrame", data);
+            client.emit("serverFrameEvents", data);
         });
 
-        this.clientEventHistory.push(this.currentClientEvents);
-        this.currentClientEvents = {};
+        this.frameEventHistory.push(this.frameEvents);
+        this.frameEvents = {};
     }
 }
 
