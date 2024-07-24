@@ -1,7 +1,7 @@
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import { LockstepServer } from "../common/common.js";
+import { RollbackServer, LockstepServer } from "../common/common.js";
 
 let globals = {};
 
@@ -23,7 +23,7 @@ class App {
             res.sendFile(req.url, { root: "./" });
         });
 
-        this.lockstepServer = new LockstepServer(this.socketServer);
+        this.lockstepServer = new RollbackServer(this.socketServer);
 
         console.log("Starting server...");
         this.httpServer.listen(3000, () => {
