@@ -1,7 +1,7 @@
 import express from "express";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import { LockstepServer } from "../common/shared.js";
+import { LockstepServer } from "../common/common.js";
 
 let globals = {};
 
@@ -18,8 +18,9 @@ class App {
         this.socketServer = new Server(this.httpServer);
 
         this.expressApp.use(express.static("public"));
-        this.expressApp.get("/shared.js", (req, res) => {
-            res.sendFile("shared.js", { root: "common" });
+
+        this.expressApp.get("/common/*", (req, res) => {
+            res.sendFile(req.url, { root: "./" });
         });
 
         this.lockstepServer = new LockstepServer(this.socketServer);
