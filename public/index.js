@@ -1,4 +1,4 @@
-const APP_FPS = 1;
+const APP_FPS = 60;
 
 let globals = {};
 

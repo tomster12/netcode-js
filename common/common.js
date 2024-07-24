@@ -1,4 +1,4 @@
-function quickCopy(obj) {
+function copyObject(obj) {
     return JSON.parse(JSON.stringify(obj));
 }
 
@@ -78,6 +78,8 @@ class GameStateUtil {
     }
 
     static updateState(state, events) {
+        events = copyObject(events);
+
         for (const event of events) {
             switch (event.type) {
                 case "playerConnect":
@@ -251,7 +253,7 @@ class RollbackClient {
             this.syncFrameData = frameData;
             this.clientFrameQueue = [];
             this.serverFrameQueue = [];
-            this.game.setState(this.syncFrameData.state);
+            this.game.setState(copyObject(this.syncFrameData.state));
         });
 
         // Receive server frame events then perform rollback sync
@@ -273,16 +275,16 @@ class RollbackClient {
         }
 
         // Rollback to sync frame, replay server frames
-        this.game.setState(quickCopy(this.syncFrameData.state));
+        this.game.setState(copyObject(this.syncFrameData.state));
 
-        for (let i = this.syncFrame; i < this.serverFrame; i++) {
+        for (let i = this.syncFrame + 1; i <= this.serverFrame; i++) {
             this.clientFrameQueue.shift();
             let frameData = this.serverFrameQueue.shift();
             this.game.updateState(frameData.events);
         }
 
         this.syncFrame = this.serverFrame;
-        this.syncFrameData = { frame: this.syncFrame, state: quickCopy(this.game.getState()) };
+        this.syncFrameData = { frame: this.syncFrame, state: copyObject(this.game.getState()) };
 
         // Reapply predicted client frames if required
         for (let i = 0; i < this.clientFrame - this.syncFrame; i++) {
@@ -294,7 +296,7 @@ class RollbackClient {
     tickFrame(state, events) {
         // Serialize client state and events then send events to server
         this.clientFrame += 1;
-        const frameData = { frame: this.clientFrame, state, events };
+        const frameData = { frame: this.clientFrame, state: copyObject(state), events };
         this.clientFrameQueue.push(frameData);
         this.socket.emit("clientFrame", frameData);
     }
@@ -369,6 +371,7 @@ class RollbackServer {
 // ----------------- Agnostic module export -----------------
 
 if (typeof window !== "undefined") {
+    window.copyObject = copyObject;
     window.DT = DT;
     window.EventBus = EventBus;
     window.GameEventUtil = GameEventUtil;
@@ -379,4 +382,4 @@ if (typeof window !== "undefined") {
     window.LockstepServer = LockstepServer;
 }
 
-export { DT, EventBus, GameEventUtil, GameStateUtil, LockstepClient, LockstepServer, RollbackClient, RollbackServer };
+export { copyObject, DT, EventBus, GameEventUtil, GameStateUtil, LockstepClient, LockstepServer, RollbackClient, RollbackServer };
