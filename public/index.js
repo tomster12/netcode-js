@@ -1,4 +1,4 @@
-const APP_FPS = 60;
+const APP_FPS = 5;
 
 let globals = {};
 
@@ -54,6 +54,10 @@ class Game {
         if (this.client) {
             this.generateEvents();
             this.updateState(this.events);
+            const playerPosString = Object.values(this.state.players)
+                .map((player) => `(${player.pos.x.toFixed(2)}, ${player.pos.y.toFixed(2)})`)
+                .join(", ");
+            console.log(`Client update ${this.client.clientFrame + 1}: ${playerPosString}`);
             this.client.tickFrame(this.state, this.events);
         }
         this.render();

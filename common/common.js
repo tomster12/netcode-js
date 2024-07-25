@@ -291,6 +291,11 @@ class RollbackClient {
             let frameData = this.clientFrameQueue[i];
             this.game.updateState(frameData.events);
         }
+
+        const playerPosString = Object.values(this.game.getState().players)
+            .map((player) => `(${player.pos.x.toFixed(2)}, ${player.pos.y.toFixed(2)})`)
+            .join(", ");
+        console.log(`Client synced ${this.clientFrame}: ${playerPosString}`);
     }
 
     tickFrame(state, events) {
@@ -356,6 +361,10 @@ class RollbackServer {
 
             // Update server state with events
             GameStateUtil.updateState(this.state, events);
+            const playerPosString = Object.values(this.state.players)
+                .map((player) => `(${player.pos.x.toFixed(2)}, ${player.pos.y.toFixed(2)})`)
+                .join(", ");
+            console.log(`Server update ${this.frame + 1}: ${playerPosString}`);
 
             // Send finalised events to all clients
             this.frame += 1;
