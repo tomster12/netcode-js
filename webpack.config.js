@@ -3,7 +3,7 @@ import path from "path";
 export default {
     mode: "development",
     watch: true,
-    entry: "./src/frontend.ts",
+    entry: "./src/index.ts",
     module: {
         rules: [
             {

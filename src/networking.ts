@@ -78,6 +78,7 @@ export namespace Lockstep {
         state: IGameState;
         frame: number;
         events: { [key: string]: GameEvent[][] };
+        serverEvents: GameEvent[];
 
         constructor(server: IOServer, state: IGameState) {
             this.server = server;
@@ -85,6 +86,7 @@ export namespace Lockstep {
             this.frame = 0;
             this.state = state;
             this.events = {};
+            this.serverEvents = [];
 
             this.server.on("connection", (socket) => {
                 this.clients.push(socket);
@@ -107,7 +109,7 @@ export namespace Lockstep {
                 // Add disconnect event to client events
                 socket.on("disconnect", () => {
                     this.clients = this.clients.filter((client) => client != socket);
-                    this.events[socket.id].push([{ socketID: socket.id, type: "playerDisconnect" }]);
+                    this.serverEvents.push({ socketID: socket.id, type: "playerDisconnect" });
                     this.tryTick();
                 });
             });
@@ -120,6 +122,7 @@ export namespace Lockstep {
                 // Accumulate all events from clients and server
                 let events: GameEvent[] = [];
                 for (let client of this.clients) events.push(...this.events[client.id].shift()!);
+                events.push(...this.serverEvents);
                 this.state.update(events);
 
                 // Send finalised events to all clients

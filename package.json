@@ -3,7 +3,7 @@
     "version": "0.0.1",
     "type": "module",
     "scripts": {
-        "backend:watch": "tsx watch src/backend.ts",
+        "backend:watch": "tsx watch src/server.ts",
         "frontend:watch": "webpack --watch"
     },
     "dependencies": {
