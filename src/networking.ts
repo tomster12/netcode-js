@@ -57,7 +57,7 @@ export namespace Lockstep {
 
             // Receive server frame events and update local state
             this.socket.on("serverFrame", ({ frame, events }) => {
-                if (frame != this.frame + 1) console.warn(`Out of sync frame: ${frame} != ${this.frame}`);
+                if (frame != this.frame) console.warn(`Client received out of sync frame: ${frame} != ${this.frame}`);
                 this.state.update(events);
                 this.frame = frame;
                 this.canTick = true;
@@ -66,6 +66,7 @@ export namespace Lockstep {
 
         tickFrame(events: GameEvent[]) {
             // Finish local frame and send events to server
+            this.frame += 1;
             this.socket.emit("clientFrame", { frame: this.frame, events });
             this.canTick = false;
         }
@@ -98,7 +99,7 @@ export namespace Lockstep {
                 // Receive client frame events and store them
                 socket.on("clientFrame", ({ frame, events }) => {
                     const expectedFrame = this.frame + 1 + this.events[socket.id].length;
-                    if (frame != expectedFrame) console.warn(`Out of sync frame: ${frame} != ${this.frame}`);
+                    if (frame != expectedFrame) console.warn(`Server received out of sync frame: ${frame} != ${expectedFrame}`);
                     this.events[socket.id].push(events);
                     this.tryTick();
                 });
