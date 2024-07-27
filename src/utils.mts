@@ -1,8 +1,12 @@
-function copyObject(obj) {
+export function copyObject(obj: object) {
     return JSON.parse(JSON.stringify(obj));
 }
 
-class DT {
+export class DT {
+    time: number;
+    dt: number;
+    dtHistory: number[];
+
     constructor() {
         this.time = Date.now();
         this.dt = 0;
@@ -33,40 +37,27 @@ class DT {
     }
 }
 
-class EventBus {
+export class EventBus {
+    listeners: { [key: string]: Function[] };
+
     constructor() {
         this.listeners = {};
     }
 
-    on(event, listener) {
+    on(event: string, listener: Function) {
         if (!this.listeners[event]) this.listeners[event] = [];
         this.listeners[event].push(listener);
     }
 
-    off(event, listener) {
+    off(event: string, listener: Function) {
         if (!this.listeners[event]) return;
         this.listeners[event] = this.listeners[event].filter((l) => l != listener);
     }
 
-    emit(event, data) {
+    emit(event: string, data: any) {
         if (!this.listeners[event]) return;
         for (let listener of this.listeners[event]) {
             listener(data);
         }
     }
 }
-// ----------------- Agnostic module export -----------------
-
-if (typeof window !== "undefined") {
-    window.copyObject = copyObject;
-    window.DT = DT;
-    window.EventBus = EventBus;
-    window.GameEventUtil = GameEventUtil;
-    window.GameStateUtil = GameStateUtil;
-    window.RollbackClient = RollbackClient;
-    window.RollbackServer = RollbackServer;
-    window.LockstepClient = LockstepClient;
-    window.LockstepServer = LockstepServer;
-}
-
-export { copyObject, DT, EventBus, GameEventUtil, GameStateUtil, LockstepClient, LockstepServer, RollbackClient, RollbackServer };
