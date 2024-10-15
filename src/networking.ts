@@ -1,5 +1,5 @@
-import { Socket as IOClientSocketBase } from "socket.io-client";
-import { Server as IOServerBase, Socket as IOServerSocketBase } from "socket.io";
+import { Socket as SIOClientSocketBase } from "socket.io-client";
+import { Server as SIOServerBase, Socket as SIOServerSocketBase } from "socket.io";
 
 export interface IGameState {
     reset(): void;
@@ -29,62 +29,69 @@ export namespace Lockstep {
         clientFrame: (data: { frame: number; events: GameEvent[] }) => void;
     }
 
-    type IOClientSocket = IOClientSocketBase<ClientToServerEvents, ServerToClientEvents>;
-    type IOServerSocket = IOServerSocketBase<ServerToClientEvents, ClientToServerEvents>;
-    type IOServer = IOServerBase<ServerToClientEvents, ClientToServerEvents>;
+    type SIOClientSocket = SIOClientSocketBase<ClientToServerEvents, ServerToClientEvents>;
+    type SIOServerSocket = SIOServerSocketBase<ServerToClientEvents, ClientToServerEvents>;
+    type SIOServer = SIOServerBase<ServerToClientEvents, ClientToServerEvents>;
 
     export class Client {
-        socket: IOClientSocket;
+        socket: SIOClientSocket;
         state: IGameState;
-        frame: number;
+        eventFrame: number;
+        stateFrame: number;
         canTick: boolean;
         connected: boolean;
 
-        constructor(socket: IOClientSocket, state: IGameState) {
+        constructor(socket: SIOClientSocket, state: IGameState) {
             this.socket = socket;
             this.state = state;
-            this.frame = 0;
+            this.eventFrame = 0;
+            this.stateFrame = 0;
             this.canTick = false;
             this.connected = false;
 
             // Reset local state to match server state
             this.socket.on("clientInitialize", ({ frame, state }) => {
                 this.state.deserialize(state);
-                this.frame = frame;
+                this.stateFrame = frame;
+                this.eventFrame = frame;
                 this.canTick = true;
                 this.connected = true;
             });
 
             // Receive server frame events and update local state
-            this.socket.on("serverFrame", ({ frame, events }) => {
-                if (frame != this.frame) console.warn(`Client received out of sync frame: ${frame} != ${this.frame}`);
+            this.socket.on("serverFrame", ({ frame: stateFrame, events }) => {
+                if (!(stateFrame > this.stateFrame && stateFrame <= this.eventFrame))
+                    console.error(`Client received out of sync frame: !(${this.stateFrame} < ${stateFrame} <= ${this.eventFrame})`);
                 this.state.update(events);
-                this.frame = frame;
+                this.stateFrame = stateFrame;
                 this.canTick = true;
             });
         }
 
         tickFrame(events: GameEvent[]) {
             // Finish local frame and send events to server
-            this.frame += 1;
-            this.socket.emit("clientFrame", { frame: this.frame, events });
-            this.canTick = false;
+            if (!this.canTick) console.error("Client cannot tick frame");
+            this.eventFrame++;
+            this.socket.emit("clientFrame", { frame: this.eventFrame, events });
+
+            // Enable to prevent buffering events
+            // this.canTick = false;
         }
     }
 
     export class Server {
-        server: IOServer;
-        clients: IOServerSocket[];
+        server: SIOServer;
+        clients: SIOServerSocket[];
         state: IGameState;
-        frame: number;
+        stateFrame: number;
         events: { [key: string]: GameEvent[][] };
         serverEvents: GameEvent[];
 
-        constructor(server: IOServer, state: IGameState) {
+        constructor(server: SIOServer, state: IGameState) {
             this.server = server;
             this.clients = [];
-            this.frame = 0;
             this.state = state;
+            this.stateFrame = 0;
             this.events = {};
             this.serverEvents = [];
 
@@ -94,14 +101,15 @@ export namespace Lockstep {
 
                 // Initialize client with current frame and state
                 socket.emit("clientInitialize", {
-                    frame: this.frame,
+                    frame: this.stateFrame,
                     state: this.state.serialize(),
                 });
 
                 // Receive client frame events and store them
-                socket.on("clientFrame", ({ frame, events }) => {
-                    const expectedFrame = this.frame + 1 + this.events[socket.id].length;
-                    if (frame != expectedFrame) console.warn(`Server received out of sync frame: ${frame} != ${expectedFrame}`);
+                socket.on("clientFrame", ({ frame: eventFrame, events }) => {
+                    // The events list buffers events from the client
+                    const expectedFrame = this.stateFrame + 1 + this.events[socket.id].length;
+                    if (eventFrame != expectedFrame) console.warn(`Server received out of sync frame: ${eventFrame} != ${expectedFrame}`);
                     this.events[socket.id].push(events);
                     this.tryTick();
                 });
@@ -116,22 +124,26 @@ export namespace Lockstep {
         }
 
         tryTick() {
-            // Find how many frames we have received from each client
+            // Find how many buffered frames of events we have received from each client
             let availableFrames = this.clients.reduce((min, client) => Math.min(min, this.events[client.id].length), Infinity);
+
+            // Work through events from clients and servers 1 at a time
             while (availableFrames > 0) {
-                // Accumulate all events from clients and server
                 let events: GameEvent[] = [];
                 for (let client of this.clients) events.push(...this.events[client.id].shift()!);
                 events.push(...this.serverEvents);
+
+                // Update server state with events
                 this.state.update(events);
 
                 // Send finalised events to all clients
-                this.frame += 1;
-                availableFrames -= 1;
-                const frameData = { frame: this.frame, events };
+                this.stateFrame += 1;
+                const frameData = { frame: this.stateFrame, events };
                 this.clients.forEach((client) => {
                     client.emit("serverFrame", frameData);
                 });
+
+                availableFrames -= 1;
             }
         }
     }

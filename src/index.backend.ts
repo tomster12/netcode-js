@@ -1,17 +1,15 @@
 import express from "express";
 import { createServer } from "http";
-import { Server } from "socket.io";
+import { Server as SIOServer } from "socket.io";
 import { Lockstep } from "./networking";
 import { GameState } from "./game";
 
-const app = express();
-const http = createServer(app);
-const io = new Server(http);
-new Lockstep.Server(io, new GameState());
+const expressApp = express();
+const httpServer = createServer(expressApp);
+expressApp.use(express.static("public"));
 
-app.use(express.static("public"));
-
-io.on("connection", (socket) => {
+const sioServer = new SIOServer(httpServer);
+sioServer.on("connection", (socket) => {
     console.log(`Socket connected: ${socket.id}`);
 
     socket.on("disconnect", () => {
@@ -19,6 +17,8 @@ io.on("connection", (socket) => {
     });
 });
 
-http.listen(3000, () => {
+new Lockstep.Server(sioServer, new GameState());
+
+httpServer.listen(3000, () => {
     console.log("listening on http://localhost:3000...");
 });

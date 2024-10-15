@@ -2,7 +2,7 @@ export function copyObject(obj: object) {
     return JSON.parse(JSON.stringify(obj));
 }
 
-export class DT {
+export class DTClock {
     time: number;
     dt: number;
     dtHistory: number[];

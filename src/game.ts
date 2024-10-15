@@ -4,21 +4,24 @@ import { IGameState, GameEvent, Lockstep } from "./networking";
 import { copyObject } from "./utils";
 
 export type PlayerInput = { dir: number; jump: boolean };
+
 export type PlayerPos = { x: number; y: number };
+
 export type Color = { r: number; g: number; b: number };
+
 export type PlayerData = { pos: PlayerPos; input: PlayerInput; color: Color; vel: PlayerPos; isGrounded: boolean };
 
 export class GameEventUtils {
     static playerConnect(socketID: string, pos: PlayerPos, color: Color): GameEvent {
-        return { type: "playerConnect", socketID, data: { pos, color, input: { dir: 0, jump: false }, vel: { x: 0, y: 0 }, isGrounded: false } };
+        return { socketID, type: "playerConnect", data: { pos, color, input: { dir: 0, jump: false }, vel: { x: 0, y: 0 }, isGrounded: false } };
     }
 
     static playerDisconnect(socketID: string): GameEvent {
-        return { type: "playerDisconnect", socketID };
+        return { socketID, type: "playerDisconnect" };
     }
 
     static playerInput(socketID: string, input: PlayerInput): GameEvent {
-        return { type: "playerInput", socketID, data: { input } };
+        return { socketID, type: "playerInput", data: { input } };
     }
 }
 
@@ -34,22 +37,20 @@ export class GameState implements IGameState {
     }
 
     set(state: GameState): void {
-        this.players = state.players;
+        this.players = copyObject(state.players);
     }
 
     update(events: GameEvent[]): void {
-        events = copyObject(events);
-
         for (const event of events) {
             switch (event.type) {
                 case "playerConnect":
-                    this.players[event.socketID] = event.data as PlayerData;
+                    this.players[event.socketID] = copyObject(event.data as PlayerData);
                     break;
                 case "playerDisconnect":
                     delete this.players[event.socketID];
                     break;
                 case "playerInput":
-                    this.players[event.socketID].input = event.data!.input as PlayerInput;
+                    this.players[event.socketID].input = copyObject(event.data!.input as PlayerInput);
                     break;
             }
         }
@@ -104,6 +105,7 @@ export class Game {
     state: GameState;
     events: GameEvent[];
     client: Lockstep.Client;
+    hasPlayer: () => boolean;
 
     constructor(p5: p5) {
         this.p5 = p5;
@@ -114,6 +116,7 @@ export class Game {
         this.state = new GameState();
         this.events = [];
         this.client = new Lockstep.Client(this.socket, this.state);
+        this.hasPlayer = () => this.state.players[this.socket.id!] != undefined;
     }
 
     setup() {
@@ -126,41 +129,44 @@ export class Game {
     draw() {
         this.p5.background(0);
 
-        if (this.socket.connected && this.client.connected) {
-            this.generateEvents();
-            // this.state.update(this.events);
-            this.client.tickFrame(this.events);
-        }
-
-        this.render();
-    }
-
-    generateEvents() {
-        if (!this.socket.connected || !this.client.connected) return;
-
-        this.events = [];
-
-        if (!this.state.players[this.socket.id!]) {
-            this.events.push(GameEventUtils.playerConnect(this.socket.id!, { x: 400, y: 400 }, { r: 255, g: 255, b: 255 }));
-        } else {
-            let input = { dir: 0, jump: false };
-            if (this.p5.keyIsDown(this.p5.LEFT_ARROW) || this.p5.keyIsDown(65)) input.dir -= 1;
-            if (this.p5.keyIsDown(this.p5.RIGHT_ARROW) || this.p5.keyIsDown(68)) input.dir += 1;
-            if (this.p5.keyIsDown(this.p5.UP_ARROW) || this.p5.keyIsDown(87) || this.p5.keyIsDown(32)) input.jump = true;
-            this.events.push(GameEventUtils.playerInput(this.socket.id!, input));
-        }
-    }
-
-    render() {
-        this.p5.background(0);
-
         if (!this.socket.connected || !this.client.connected) {
-            this.p5.fill(255);
-            this.p5.textAlign(this.p5.CENTER, this.p5.CENTER);
-            this.p5.text("Connecting...", this.p5.width / 2, this.p5.height / 2);
+            this.renderConnecting();
             return;
         }
 
+        this.updateGame();
+        this.renderGame();
+    }
+
+    renderConnecting() {
+        this.p5.fill(255);
+        this.p5.textAlign(this.p5.CENTER, this.p5.CENTER);
+        this.p5.text("Connecting...", this.p5.width / 2, this.p5.height / 2);
+    }
+
+    updateGame() {
+        if (this.client.canTick) {
+            this.events = [];
+
+            // Handle user inputs / events
+            if (!this.hasPlayer()) {
+                this.events.push(GameEventUtils.playerConnect(this.socket.id!, { x: 400, y: 400 }, { r: 255, g: 255, b: 255 }));
+            } else {
+                let input = { dir: 0, jump: false };
+                if (this.p5.keyIsDown(this.p5.LEFT_ARROW) || this.p5.keyIsDown(65)) input.dir -= 1;
+                if (this.p5.keyIsDown(this.p5.RIGHT_ARROW) || this.p5.keyIsDown(68)) input.dir += 1;
+                if (this.p5.keyIsDown(this.p5.UP_ARROW) || this.p5.keyIsDown(87) || this.p5.keyIsDown(32)) input.jump = true;
+                this.events.push(GameEventUtils.playerInput(this.socket.id!, input));
+            }
+
+            this.client.tickFrame(this.events);
+        }
+    }
+
+    renderGame() {
+        this.p5.background(0);
+
+        // Render all the players
         this.p5.noStroke();
         for (let id in this.state.players) {
             let player = this.state.players[id];
